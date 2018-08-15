@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import os
@@ -23,26 +23,11 @@ LLVM_SOURCE = 'llvm-{version}.src'
 CLANG_SOURCE = 'cfe-{version}.src'
 BUNDLE_NAME = 'clang+llvm-{version}-{target}'
 TARGET_REGEX = re.compile( '^Target: (?P<target>.*)$' )
-BINTRAY_BASE_URL = 'https://api.bintray.com/'
-BINTRAY_UPLOAD_URL = ( BINTRAY_BASE_URL +
-                       'content/'
-                       '{subject}/'
-                       '{repo}/'
-                       '{package}/'
-                       '{version}/'
-                       '{file_path}' )
-BINTRAY_PUBLISH_URL = ( BINTRAY_BASE_URL +
-                        'content/'
-                        '{subject}/'
-                        '{repo}/'
-                        '{package}/'
-                        '{version}/'
-                        'publish' )
-BINTRAY_DOWNLOAD_LIST_URL = ( BINTRAY_BASE_URL +
-                              'file_metadata/'
-                              '{subject}/'
-                              '{repo}/'
-                              '{file_path}' )
+GITHUB_BASE_URL = 'https://api.github.com/'
+GITHUB_RELEASES_URL = (
+  GITHUB_BASE_URL + 'repos/{owner}/{repo}/releases' )
+GITHUB_ASSETS_URL = (
+  GITHUB_BASE_URL + 'repos/{owner}/{repo}/releases/assets/{asset_id}' )
 RETRY_INTERVAL = 10
 SHARED_LIBRARY_REGEX = re.compile( '.*\.so(.\d+)*$' )
 
@@ -171,7 +156,8 @@ def BundleLlvm( install_dir, version ):
   archive_name = bundle_name + '.tar.xz'
   print( 'Bundling LLVM to {}.'.format( archive_name ) )
   with tarfile.open( name = archive_name, mode = 'w:xz' ) as tar_file:
-    # The .so files are not set as executable.
+    # The .so files are not set as executable when copied to the install
+    # directory. Set them manually.
     for root, directories, files in os.walk( install_dir ):
       for filename in files:
         filepath = os.path.join( root, filename )
@@ -187,60 +173,71 @@ def BundleLlvm( install_dir, version ):
 
 
 def UploadLlvm( version, bundle_path, user_name, api_token ):
+  response = requests.get(
+    GITHUB_RELEASES_URL.format( owner = user_name, repo = 'llvm' ),
+    auth = ( user_name, api_token )
+  )
+  if response.status_code != 200:
+    message = response.json()[ 'message' ]
+    sys.exit( 'Getting releases failed with message: {}'.format( message ) )
+
   bundle_name = os.path.basename( bundle_path )
-  print( 'Uploading {} to Bintray.'.format( bundle_name ) )
-  with open( bundle_path, 'rb' ) as bundle:
-    response = requests.put(
-      BINTRAY_UPLOAD_URL.format( subject = user_name,
-                                 repo = 'llvm',
-                                 package = 'llvm',
-                                 version = version,
-                                 file_path = bundle_name ),
-      data = bundle,
-      params = {
-        'publish': 1,
-        'override': 1
-      },
+
+  upload_url = None
+  for release in response.json():
+    if release[ 'tag_name' ] != version:
+      continue
+
+    print( 'Version {} already released.'.format( version ) )
+    upload_url = release[ 'upload_url' ]
+
+    for asset in release[ 'assets' ]:
+      if asset[ 'name' ] != bundle_name:
+        continue
+
+      print( 'Deleting {} on GitHub.'.format( bundle_name ) )
+      response = requests.delete(
+        GITHUB_ASSETS_URL.format( owner = user_name,
+                                  repo = 'llvm',
+                                  asset_id = asset[ 'id' ] ),
+        json = { 'tag_name': version },
+        auth = ( user_name, api_token )
+      )
+
+      if response.status_code != 204:
+        message = response.json()[ 'message' ]
+        sys.exit( 'Creating release failed with message: {}'.format( message ) )
+
+      break
+
+  if not upload_url:
+    print( 'Releasing {} on GitHub.'.format( version ) )
+    response = requests.post(
+      GITHUB_RELEASES_URL.format( owner = user_name, repo = 'llvm' ),
+      json = { 'tag_name': version },
       auth = ( user_name, api_token )
     )
     if response.status_code != 201:
       message = response.json()[ 'message' ]
-      sys.exit( 'Upload failed with message: {}'.format( message ) )
+      sys.exit( 'Releasing failed with message: {}'.format( message ) )
 
+    upload_url = response.json()[ 'upload_url' ]
 
+  upload_url = upload_url.replace( '{?name,label}', '' )
 
-def PublishLlvm( version, bundle_name, user_name, api_token ):
-  print( 'Publishing {} on Bintray.'.format( bundle_name ) )
-  response = requests.post(
-    BINTRAY_PUBLISH_URL.format( subject = user_name,
-                                repo = 'llvm',
-                                package = 'llvm',
-                                version = version ),
-    json = {
-      'discard': False,
-      'publish_wait_for_secs': -1
-    },
-    auth = ( user_name, api_token )
-  )
-  if response.status_code != 200:
+  with open( bundle_path, 'rb' ) as bundle:
+    print( 'Uploading {} on GitHub.'.format( bundle_name, version ) )
+    response = requests.post(
+      upload_url,
+      params = { 'name': bundle_name },
+      headers = { 'Content-Type': 'application/x-xz' },
+      data = bundle,
+      auth = ( user_name, api_token )
+    )
+
+  if response.status_code != 201:
     message = response.json()[ 'message' ]
-    sys.exit( 'Publish failed with message: {}'.format( message ) )
-
-
-def ListLlvm( version, bundle_name, user_name, api_token):
-  print( 'List {} on Bintray.'.format( bundle_name ) )
-  response = requests.put(
-    BINTRAY_DOWNLOAD_LIST_URL.format( subject = user_name,
-                                      repo = 'llvm',
-                                      file_path = bundle_name ),
-    json = {
-      'list_in_downloads': True
-    },
-    auth = ( user_name, api_token )
-  )
-  if response.status_code != 200:
-    message = response.json()[ 'message' ]
-    sys.exit( 'List failed with message: {}'.format( message ) )
+    sys.exit( 'Uploading failed with message: {}'.format( message ) )
 
 
 def ParseArguments():
@@ -249,26 +246,26 @@ def ParseArguments():
   parser.add_argument( '--release-candidate', type = int,
                        help = 'LLVM release candidate number.' )
 
-  parser.add_argument( '--bt-user', action='store',
-                       help = 'Bintray user name. Defaults to environment '
-                              'variable: YCMD_BINTRAY_USERNAME' )
-  parser.add_argument( '--bt-token', action='store',
-                       help = 'Bintray api token. Defaults to environment '
-                              'variable: YCMD_BINTRAY_API_TOKEN.' )
+  parser.add_argument( '--gh-user', action='store',
+                       help = 'GitHub user name. Defaults to environment '
+                              'variable: GITHUB_USERNAME' )
+  parser.add_argument( '--gh-token', action='store',
+                       help = 'GitHub api token. Defaults to environment '
+                              'variable: GITHUB_TOKEN.' )
 
   args = parser.parse_args()
 
-  if not args.bt_user:
-    if 'YCMD_BINTRAY_USERNAME' not in os.environ:
-      sys.exit( 'ERROR: Must specify either --bt-user or '
-                'YCMD_BINTRAY_USERNAME in environment' )
-    args.bt_user = os.environ[ 'YCMD_BINTRAY_USERNAME' ]
+  if not args.gh_user:
+    if 'GITHUB_USERNAME' not in os.environ:
+      sys.exit( 'ERROR: Must specify either --gh-user or '
+                'GITHUB_USERNAME in environment' )
+    args.gh_user = os.environ[ 'GITHUB_USERNAME' ]
 
-  if not args.bt_token:
-    if 'YCMD_BINTRAY_API_TOKEN' not in os.environ:
-      sys.exit( 'ERROR: Must specify either --bt-token or '
-                'YCMD_BINTRAY_API_TOKEN in environment' )
-    args.bt_token = os.environ[ 'YCMD_BINTRAY_API_TOKEN' ]
+  if not args.gh_token:
+    if 'GITHUB_TOKEN' not in os.environ:
+      sys.exit( 'ERROR: Must specify either --gh-token or '
+                'GITHUB_TOKEN in environment' )
+    args.gh_token = os.environ[ 'GITHUB_TOKEN' ]
 
   return args
 
@@ -293,10 +290,7 @@ def Main():
     os.mkdir( install_dir )
   BuildLlvm( build_dir, install_dir, llvm_source )
   bundle_path = BundleLlvm( install_dir, version )
-  UploadLlvm( version, bundle_path, args.bt_user, args.bt_token )
-  bundle_name = os.path.basename( bundle_path )
-  PublishLlvm( version, bundle_name, args.bt_user, args.bt_token )
-  Retries( ListLlvm, version, bundle_name, args.bt_user, args.bt_token )
+  UploadLlvm( version, bundle_path, args.gh_user, args.gh_token )
 
 
 if __name__ == "__main__":
