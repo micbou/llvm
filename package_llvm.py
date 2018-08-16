@@ -150,10 +150,7 @@ def GetTarget( install_dir ):
   sys.exit( 'Cannot deduce LLVM target.' )
 
 
-def BundleLlvm( install_dir, version ):
-  target = GetTarget( install_dir )
-  bundle_name = BUNDLE_NAME.format( version = version, target = target )
-  archive_name = bundle_name + '.tar.xz'
+def BundleLlvm( bundle_name, archive_name, install_dir, version ):
   print( 'Bundling LLVM to {}.'.format( archive_name ) )
   with tarfile.open( name = archive_name, mode = 'w:xz' ) as tar_file:
     # The .so files are not set as executable when copied to the install
@@ -169,7 +166,6 @@ def BundleLlvm( install_dir, version ):
         arcname = os.path.join( bundle_name,
                                 os.path.relpath( filepath, install_dir ) )
         tar_file.add( filepath, arcname = arcname )
-  return os.path.join( DIR_OF_THIS_SCRIPT, archive_name )
 
 
 def UploadLlvm( version, bundle_path, user_name, api_token ):
@@ -289,7 +285,12 @@ def Main():
   if not os.path.exists( install_dir ):
     os.mkdir( install_dir )
   BuildLlvm( build_dir, install_dir, llvm_source )
-  bundle_path = BundleLlvm( install_dir, version )
+  target = GetTarget( install_dir )
+  bundle_name = BUNDLE_NAME.format( version = version, target = target )
+  archive_name = bundle_name + '.tar.xz'
+  bundle_path = os.path.join( DIR_OF_THIS_SCRIPT, archive_name )
+  if not os.path.exists( bundle_path ):
+    BundleLlvm( install_dir, version )
   UploadLlvm( version, bundle_path, args.gh_user, args.gh_token )
 
 
