@@ -82,6 +82,12 @@ def GetLlvmVersion( args ):
   return args.version
 
 
+def GetBundleVersion( args ):
+  if args.release_candidate:
+    return args.version + '-rc' + str( args.release_candidate )
+  return args.version
+
+
 def DownloadLlvmSource( llvm_url, llvm_source ):
   llvm_archive = llvm_source + '.tar.xz'
 
@@ -269,9 +275,9 @@ def ParseArguments():
 def Main():
   args = ParseArguments()
   llvm_url = GetLlvmBaseUrl( args )
-  version = GetLlvmVersion( args )
-  clang_source = CLANG_SOURCE.format( version = version )
-  llvm_source = LLVM_SOURCE.format( version = version )
+  llvm_version = GetLlvmVersion( args )
+  clang_source = CLANG_SOURCE.format( version = llvm_version )
+  llvm_source = LLVM_SOURCE.format( version = llvm_version )
   if not os.path.exists( os.path.join( DIR_OF_THIS_SCRIPT, llvm_source ) ):
     DownloadLlvmSource( llvm_url, llvm_source )
   if not os.path.exists( os.path.join( DIR_OF_THIS_SCRIPT, llvm_source,
@@ -286,12 +292,13 @@ def Main():
     os.mkdir( install_dir )
   BuildLlvm( build_dir, install_dir, llvm_source )
   target = GetTarget( install_dir )
-  bundle_name = BUNDLE_NAME.format( version = version, target = target )
+  bundle_version = GetBundleVersion( args )
+  bundle_name = BUNDLE_NAME.format( version = bundle_version, target = target )
   archive_name = bundle_name + '.tar.xz'
   bundle_path = os.path.join( DIR_OF_THIS_SCRIPT, archive_name )
   if not os.path.exists( bundle_path ):
-    BundleLlvm( install_dir, version )
-  UploadLlvm( version, bundle_path, args.gh_user, args.gh_token )
+    BundleLlvm( bundle_name, archive_name, install_dir, bundle_version )
+  UploadLlvm( bundle_version, bundle_path, args.gh_user, args.gh_token )
 
 
 if __name__ == "__main__":
