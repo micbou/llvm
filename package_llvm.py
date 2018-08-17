@@ -174,23 +174,24 @@ def BundleLlvm( bundle_name, archive_name, install_dir, version ):
         tar_file.add( filepath, arcname = arcname )
 
 
-def UploadLlvm( version, bundle_path, user_name, api_token ):
+def UploadLlvm( args, bundle_path ):
   response = requests.get(
-    GITHUB_RELEASES_URL.format( owner = user_name, repo = 'llvm' ),
-    auth = ( user_name, api_token )
+    GITHUB_RELEASES_URL.format( owner = args.gh_user, repo = 'llvm' ),
+    auth = ( args.gh_user, args.gh_token )
   )
   if response.status_code != 200:
     message = response.json()[ 'message' ]
     sys.exit( 'Getting releases failed with message: {}'.format( message ) )
 
+  bundle_version = GetBundleVersion( args )
   bundle_name = os.path.basename( bundle_path )
 
   upload_url = None
   for release in response.json():
-    if release[ 'tag_name' ] != version:
+    if release[ 'tag_name' ] != bundle_version:
       continue
 
-    print( 'Version {} already released.'.format( version ) )
+    print( 'Version {} already released.'.format( bundle_version ) )
     upload_url = release[ 'upload_url' ]
 
     for asset in release[ 'assets' ]:
@@ -199,11 +200,11 @@ def UploadLlvm( version, bundle_path, user_name, api_token ):
 
       print( 'Deleting {} on GitHub.'.format( bundle_name ) )
       response = requests.delete(
-        GITHUB_ASSETS_URL.format( owner = user_name,
+        GITHUB_ASSETS_URL.format( owner = args.gh_user,
                                   repo = 'llvm',
                                   asset_id = asset[ 'id' ] ),
         json = { 'tag_name': version },
-        auth = ( user_name, api_token )
+        auth = ( args.gh_user, args.gh_token )
       )
 
       if response.status_code != 204:
@@ -213,11 +214,20 @@ def UploadLlvm( version, bundle_path, user_name, api_token ):
       break
 
   if not upload_url:
-    print( 'Releasing {} on GitHub.'.format( version ) )
+    print( 'Releasing {} on GitHub.'.format( bundle_version ) )
+    prerelease = args.release_candidate is not None
+    name = 'LLVM and Clang ' + args.version
+    if args.release_candidate:
+      name += ' RC' + str( args.release_candidate )
     response = requests.post(
-      GITHUB_RELEASES_URL.format( owner = user_name, repo = 'llvm' ),
-      json = { 'tag_name': version },
-      auth = ( user_name, api_token )
+      GITHUB_RELEASES_URL.format( owner = args.gh_user, repo = 'llvm' ),
+      json = {
+        'tag_name': bundle_version,
+        'name': name,
+        'body': name + ' without realtime, terminfo, and zlib dependencies.',
+        'prerelease': prerelease
+      },
+      auth = ( args.gh_user, args.gh_token )
     )
     if response.status_code != 201:
       message = response.json()[ 'message' ]
@@ -228,13 +238,13 @@ def UploadLlvm( version, bundle_path, user_name, api_token ):
   upload_url = upload_url.replace( '{?name,label}', '' )
 
   with open( bundle_path, 'rb' ) as bundle:
-    print( 'Uploading {} on GitHub.'.format( bundle_name, version ) )
+    print( 'Uploading {} on GitHub.'.format( bundle_name ) )
     response = requests.post(
       upload_url,
       params = { 'name': bundle_name },
       headers = { 'Content-Type': 'application/x-xz' },
       data = bundle,
-      auth = ( user_name, api_token )
+      auth = ( args.gh_user, args.gh_token )
     )
 
   if response.status_code != 201:
@@ -298,7 +308,7 @@ def Main():
   bundle_path = os.path.join( DIR_OF_THIS_SCRIPT, archive_name )
   if not os.path.exists( bundle_path ):
     BundleLlvm( bundle_name, archive_name, install_dir, bundle_version )
-  UploadLlvm( bundle_version, bundle_path, args.gh_user, args.gh_token )
+  UploadLlvm( args, bundle_path )
 
 
 if __name__ == "__main__":
