@@ -270,7 +270,7 @@ def UploadLlvm( args, bundle_path ):
         GITHUB_ASSETS_URL.format( owner = args.gh_user,
                                   repo = 'llvm',
                                   asset_id = asset[ 'id' ] ),
-        json = { 'tag_name': version },
+        json = { 'tag_name': bundle_version },
         auth = ( args.gh_user, args.gh_token )
       )
 
