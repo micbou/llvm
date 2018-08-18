@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import functools
 import os
 import platform
 import re
@@ -30,6 +31,42 @@ GITHUB_ASSETS_URL = (
   GITHUB_BASE_URL + 'repos/{owner}/{repo}/releases/assets/{asset_id}' )
 RETRY_INTERVAL = 10
 SHARED_LIBRARY_REGEX = re.compile( '.*\.so(.\d+)*$' )
+
+OBJDUMP_NEEDED_REGEX = re.compile(
+  '^  NEEDED               (?P<dependency>.*)$' )
+OBJDUMP_VERSION_REGEX = re.compile(
+  '^    0x[0-9a-f]+ 0x00 \d+ (?P<library>.*)_(?P<version>.*)$' )
+
+
+@functools.total_ordering
+class Version( object ):
+
+  def __init__( self, version ):
+    split_version = version.split( '.' )
+    self.major = int( split_version[ 0 ] )
+    self.minor = int( split_version[ 1 ] ) if len( split_version ) > 1 else 0
+    self.patch = int( split_version[ 2 ] ) if len( split_version ) > 2 else 0
+
+
+  def __eq__( self, other ):
+    if not isinstance( other, Version ):
+      raise ValueError( 'Must be compared with a Version object.' )
+    return ( ( self.major, self.minor, self.patch ) == 
+             ( other.major, other.minor, other.patch ) )
+
+
+  def __lt__( self, other ):
+    if not isinstance( other, Version ):
+      raise ValueError( 'Must be compared with a Version object.' )
+    return ( ( self.major, self.minor, self.patch ) <
+             ( other.major, other.minor, other.patch ) )
+
+
+  def __repr__( self ):
+    return '.'.join( ( str( self.major ),
+                       str( self.minor ),
+                       str( self.patch ) ) )
+
 
 
 def Retries( function, *args ):
@@ -143,6 +180,36 @@ def BuildLlvm( build_dir, install_dir, llvm_source ):
     subprocess.check_call( [ cmake, '--build', '.', '--target', 'install' ] )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
+
+
+def CheckLlvm( install_dir ):
+  print( 'Checking LLVM dependencies.' )
+  dependencies = []
+  objdump = shutil.which( 'objdump' )
+  output = subprocess.check_output(
+    [ objdump, '-p', os.path.join( install_dir, 'lib', 'libclang.so' ) ],
+    stderr = subprocess.STDOUT ).decode( 'utf8' )
+  max_versions = {}
+  for line in output.splitlines():
+    match = OBJDUMP_NEEDED_REGEX.search( line )
+    if match:
+      dependencies.append( match.group( 'dependency' ) )
+
+    match = OBJDUMP_VERSION_REGEX.search( line )
+    if match:
+      library = match.group( 'library' )
+      version = Version( match.group( 'version' ) )
+      max_version = max_versions.get( library )
+      if not max_version or version > max_version:
+        max_versions[ library ] = version
+
+  print( 'List of dependencies:' )
+  for dependency in dependencies:
+    print( dependency )
+
+  print( 'Maximum versions required:' )
+  for library, version in max_versions.items():
+    print( library + ' ' + str( version ) )
 
 
 def GetTarget( install_dir ):
@@ -301,6 +368,7 @@ def Main():
   if not os.path.exists( install_dir ):
     os.mkdir( install_dir )
   BuildLlvm( build_dir, install_dir, llvm_source )
+  CheckLlvm( install_dir )
   target = GetTarget( install_dir )
   bundle_version = GetBundleVersion( args )
   bundle_name = BUNDLE_NAME.format( version = bundle_version, target = target )
