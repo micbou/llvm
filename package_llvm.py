@@ -17,9 +17,9 @@ DIR_OF_THIS_SCRIPT = os.path.dirname( os.path.abspath( __file__ ) )
 
 CHUNK_SIZE = 1024 * 1024 # 1MB
 
-LLVM_RELEASE_URL = 'http://releases.llvm.org/{version}'
+LLVM_RELEASE_URL = 'https://releases.llvm.org/{version}'
 LLVM_PRERELEASE_URL = (
-  'http://prereleases.llvm.org/{version}/rc{release_candidate}' )
+  'https://prereleases.llvm.org/{version}/rc{release_candidate}' )
 LLVM_SOURCE = 'llvm-{version}.src'
 CLANG_SOURCE = 'cfe-{version}.src'
 BUNDLE_NAME = 'clang+llvm-{version}-{target}'
