@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import collections
 import functools
 import os
 import platform
@@ -22,6 +23,7 @@ LLVM_PRERELEASE_URL = (
   'https://prereleases.llvm.org/{version}/rc{release_candidate}' )
 LLVM_SOURCE = 'llvm-{version}.src'
 CLANG_SOURCE = 'cfe-{version}.src'
+CLANG_TOOLS_SOURCE = 'clang-tools-extra-{version}.src'
 BUNDLE_NAME = 'clang+llvm-{version}-{target}'
 TARGET_REGEX = re.compile( '^Target: (?P<target>.*)$' )
 GITHUB_BASE_URL = 'https://api.github.com/'
@@ -125,24 +127,14 @@ def GetBundleVersion( args ):
   return args.version
 
 
-def DownloadLlvmSource( llvm_url, llvm_source ):
-  llvm_archive = llvm_source + '.tar.xz'
+def DownloadSource( url, source ):
+  archive = source + '.tar.xz'
 
-  if not os.path.exists( llvm_archive ):
-    Download( llvm_url + '/' + llvm_archive )
+  if not os.path.exists( archive ):
+    Download( url + '/' + archive )
 
-  if not os.path.exists( llvm_source ):
-    Extract( llvm_archive )
-
-
-def DownloadClangSource( llvm_url, clang_source ):
-  clang_archive = clang_source + '.tar.xz'
-
-  if not os.path.exists( clang_archive ):
-    Download( llvm_url + '/' + clang_archive )
-
-  if not os.path.exists( clang_source ):
-    Extract( clang_archive )
+  if not os.path.exists( source ):
+    Extract( archive )
 
 
 def MoveClangSourceToLlvm( clang_source, llvm_source ):
@@ -150,6 +142,14 @@ def MoveClangSourceToLlvm( clang_source, llvm_source ):
   shutil.move(
     os.path.join( DIR_OF_THIS_SCRIPT, 'clang' ),
     os.path.join( DIR_OF_THIS_SCRIPT, llvm_source, 'tools' )
+  )
+
+
+def MoveClangToolsSourceToLlvm( clang_tools_source, llvm_source ):
+  os.rename( clang_tools_source, 'extra' )
+  shutil.move(
+    os.path.join( DIR_OF_THIS_SCRIPT, 'extra' ),
+    os.path.join( DIR_OF_THIS_SCRIPT, llvm_source, 'tools', 'clang', 'tools' )
   )
 
 
@@ -182,14 +182,11 @@ def BuildLlvm( build_dir, install_dir, llvm_source ):
     os.chdir( DIR_OF_THIS_SCRIPT )
 
 
-def CheckLlvm( install_dir ):
-  print( 'Checking LLVM dependencies.' )
+def CheckDependencies( name, path, versions ):
   dependencies = []
   objdump = shutil.which( 'objdump' )
-  output = subprocess.check_output(
-    [ objdump, '-p', os.path.join( install_dir, 'lib', 'libclang.so' ) ],
+  output = subprocess.check_output( [ objdump, '-p', path ],
     stderr = subprocess.STDOUT ).decode( 'utf8' )
-  max_versions = {}
   for line in output.splitlines():
     match = OBJDUMP_NEEDED_REGEX.search( line )
     if match:
@@ -199,17 +196,24 @@ def CheckLlvm( install_dir ):
     if match:
       library = match.group( 'library' )
       version = Version( match.group( 'version' ) )
-      max_version = max_versions.get( library )
-      if not max_version or version > max_version:
-        max_versions[ library ] = version
+      versions[ library ].append( version )
 
-  print( 'List of dependencies:' )
+  print( 'List of {} dependencies:'.format( name ) )
   for dependency in dependencies:
     print( dependency )
 
+
+def CheckLlvm( install_dir ):
+  print( 'Checking LLVM dependencies.' )
+  versions = collections.defaultdict( list )
+  CheckDependencies(
+    'libclang', os.path.join( install_dir, 'lib', 'libclang.so' ), versions )
+  CheckDependencies(
+    'clangd', os.path.join( install_dir, 'bin', 'clangd' ), versions )
+
   print( 'Maximum versions required:' )
-  for library, version in max_versions.items():
-    print( library + ' ' + str( version ) )
+  for library, values in versions.items():
+    print( library + ' ' + str( max( values ) ) )
 
 
 def GetTarget( install_dir ):
@@ -353,14 +357,19 @@ def Main():
   args = ParseArguments()
   llvm_url = GetLlvmBaseUrl( args )
   llvm_version = GetLlvmVersion( args )
-  clang_source = CLANG_SOURCE.format( version = llvm_version )
   llvm_source = LLVM_SOURCE.format( version = llvm_version )
+  clang_source = CLANG_SOURCE.format( version = llvm_version )
+  clang_tools_source = CLANG_TOOLS_SOURCE.format( version = llvm_version )
   if not os.path.exists( os.path.join( DIR_OF_THIS_SCRIPT, llvm_source ) ):
-    DownloadLlvmSource( llvm_url, llvm_source )
+    DownloadSource( llvm_url, llvm_source )
   if not os.path.exists( os.path.join( DIR_OF_THIS_SCRIPT, llvm_source,
                                        'tools', 'clang' ) ):
-    DownloadClangSource( llvm_url, clang_source )
+    DownloadSource( llvm_url, clang_source )
     MoveClangSourceToLlvm( clang_source, llvm_source )
+  if not os.path.exists( os.path.join( DIR_OF_THIS_SCRIPT, llvm_source,
+                                       'tools', 'clang', 'tools', 'extra' ) ):
+    DownloadSource( llvm_url, clang_tools_source )
+    MoveClangToolsSourceToLlvm( clang_tools_source, llvm_source )
   build_dir = os.path.join( DIR_OF_THIS_SCRIPT, 'build' )
   install_dir = os.path.join( DIR_OF_THIS_SCRIPT, 'install' )
   if not os.path.exists( build_dir ):
