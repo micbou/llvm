@@ -17,5 +17,6 @@ jobs:
       - name: Package
         env:
           GITHUB_USERNAME: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./package_llvm.py ${{ github.event.inputs.version }}
 
