@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Run a jone-line script
+      - name: Package
         env:
           GITHUB_USERNAME: ${{ github.actor }}
-        run: ./package_llvm.py ${{ github.event.inputs.llvm-version }}
+        run: ./package_llvm.py ${{ github.event.inputs.version }}
 
