@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+CONTAINER=youcompleteme/llvm:build
+
+pushd $(dirname $0)
+  docker run --mount src="$(pwd)/../",target=/root/llvm,type=bind \
+             -it ${CONTAINER} \
+             "$@"
+popd
+
